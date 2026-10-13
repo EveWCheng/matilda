@@ -1,0 +1,7 @@
+rectangle-packer
+numpy
+networkx
+matplotlib
+tqdm
+selenium
+scipy

@@ -97,6 +97,8 @@ class HarmonicRepresentativesComputer:
             self.homology = homology
 
         self.harmonic_cycles = dict()
+        # harmonics before being projected off the other still-alive harmonics
+        self.harmonic_cycles_before_projection = dict()
 
     def compute_harmonic_cycles(
         self,
@@ -120,6 +122,7 @@ class HarmonicRepresentativesComputer:
             by default 0, no info
         """
         self.harmonic_cycles[dim] = dict()
+        self.harmonic_cycles_before_projection[dim] = dict()
 
         if reduced:
             boundary_dict = self.homology.reduced_boundary_matrix
@@ -296,6 +299,10 @@ class HarmonicRepresentativesComputer:
                 else:
                     this_harmonic = this_cycle_arr
 
+            self.harmonic_cycles_before_projection[dim][this_id] = dict(
+                zip(fidx, this_harmonic)
+            )
+
             # now we need to project this to the orthogonal of other harmonic representatives that might be still alive
             # loop through all of the already computer harmonic cycles
             # and see if some of them are still alive
@@ -339,6 +346,84 @@ class HarmonicRepresentativesComputer:
 
             # save the new harmonic to the dict
             self.harmonic_cycles[dim][this_id] = dict(zip(fidx, this_harmonic))
+
+    """need check"""
+    def compute_harmonic_histories(self, dim, edge_ids=None, tol=1e-9, dependence_tol=1e-10):
+        """Per class, each face's (t, weight) at every distinct filtration value from birth until before death."""
+        K = self.K
+        order = list(K.simplices_indices)
+        size = lambda i: len(K.simplices[K.simplices_indices[i]])
+        value = lambda i: float(K.appears_at[K.simplices_indices[i]])
+        faces = [i for i in order if size(i) == dim + 1]
+        row = {f: r for r, f in enumerate(faces)}
+        recorded = None if edge_ids is None else np.array(sorted(row[f] for f in edge_ids if f in row), dtype=int)
+        record_rows = np.arange(len(faces)) if recorded is None else recorded
+
+        cycles = self.homology.persistent_cycles.get(dim, {})
+        death = {}
+        for cid in cycles:
+            killer = int(self.homology.proto_bars[dim][cid][1])
+            death[cid] = value(killer) if killer >= 0 else np.inf
+        boundary = self.homology.boundary_matrix
+
+        Q = np.zeros((len(faces), 0))
+        alive = {}
+        last = {}
+        last_t = {}
+        histories = {cid: {} for cid in cycles}
+
+        def record(cid, t, final=False):
+            h = alive[cid]
+            for r in record_rows:
+                w = float(h[r])
+                prev = last[cid].get(r)
+                changed = abs(w - (prev if prev is not None else 0.0)) > tol
+                if changed or (final and prev is not None and histories[cid][faces[r]][-1][0] != t):
+                    histories[cid].setdefault(faces[r], []).append((t, w))
+                    last[cid][r] = w
+
+        groups = []
+        for sid in order:
+            if groups and value(sid) == value(groups[-1][-1]):
+                groups[-1].append(sid)
+            else:
+                groups.append([sid])
+
+        for group in groups:
+            t = value(group[0])
+            for cid in [c for c in alive if death[c] <= t]:
+                record(cid, last_t[cid], final=True)
+                del alive[cid]
+            for sid in group:
+                if sid in cycles:
+                    h = np.zeros(len(faces))
+                    for f, c in cycles[sid].items():
+                        h[row[f]] = c
+                    alive[sid], last[sid] = h - Q @ (Q.T @ h), {}
+                elif size(sid) == dim + 2 and sid in boundary:
+                    q = np.zeros(len(faces))
+                    for f, c in boundary[sid].items():
+                        q[row[f]] = c
+                    for _ in range(2):
+                        q -= Q @ (Q.T @ q)
+                    norm = np.linalg.norm(q)
+                    if norm < dependence_tol:
+                        continue
+                    q /= norm
+                    Q = np.column_stack([Q, q])
+                    for h in alive.values():
+                        h -= (q @ h) * q
+            for cid in [c for c in alive if death[c] <= t]:
+                del alive[cid]
+            for cid in alive:
+                record(cid, t)
+                last_t[cid] = t
+        for cid in list(alive):
+            record(cid, last_t[cid], final=True)
+
+        self.harmonic_histories = getattr(self, "harmonic_histories", {})
+        self.harmonic_histories[dim] = histories
+        return histories
 
 
 class OrthonormalBasis:

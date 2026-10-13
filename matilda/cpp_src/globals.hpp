@@ -5,6 +5,7 @@
 #define MOD_INV_LOOKUP_SIZE 1024
 
 #include <cstdlib>
+#include <cstdint>
 #include <map>
 
 namespace matilda
