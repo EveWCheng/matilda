@@ -349,7 +349,7 @@ class HarmonicRepresentativesComputer:
 
     """need check"""
     def compute_harmonic_histories(self, dim, edge_ids=None, tol=1e-9, dependence_tol=1e-10):
-        """Per class, each face's (t, weight) at every distinct filtration value from birth until before death."""
+        """Per class, every seen face's (t, weight) at each value where any face changes, zero before it appears."""
         K = self.K
         order = list(K.simplices_indices)
         size = lambda i: len(K.simplices[K.simplices_indices[i]])
@@ -374,12 +374,14 @@ class HarmonicRepresentativesComputer:
 
         def record(cid, t, final=False):
             h = alive[cid]
+            if not final and all(abs(h[r] - last[cid].get(r, 0.0)) <= tol for r in record_rows):
+                return
             for r in record_rows:
                 w = float(h[r])
-                prev = last[cid].get(r)
-                changed = abs(w - (prev if prev is not None else 0.0)) > tol
-                if changed or (final and prev is not None and histories[cid][faces[r]][-1][0] != t):
-                    histories[cid].setdefault(faces[r], []).append((t, w))
+                if r in last[cid] or abs(w) > tol:
+                    points = histories[cid].setdefault(faces[r], [])
+                    if not points or points[-1][0] != t:
+                        points.append((t, w))
                     last[cid][r] = w
 
         groups = []
@@ -420,6 +422,10 @@ class HarmonicRepresentativesComputer:
                 last_t[cid] = t
         for cid in list(alive):
             record(cid, last_t[cid], final=True)
+        for history in histories.values():
+            times = sorted({t for points in history.values() for t, _ in points})
+            for face, points in history.items():
+                history[face] = [(t, 0.0) for t in times if t < points[0][0]] + points
 
         self.harmonic_histories = getattr(self, "harmonic_histories", {})
         self.harmonic_histories[dim] = histories
